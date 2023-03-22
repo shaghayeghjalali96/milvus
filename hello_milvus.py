@@ -9,6 +9,8 @@
 # 6. delete entities by PK
 # 7. drop collection
 import time
+from sklearn.feature_extraction.text import CountVectorizer
+import pandas as pd
 
 import numpy as np
 from pymilvus import (
@@ -20,7 +22,7 @@ from pymilvus import (
 
 fmt = "\n=== {:30} ===\n"
 search_latency_fmt = "search latency = {:.4f}s"
-num_entities, dim = 3000, 8
+num_entities, dim = 5, 11
 
 #################################################################################
 # 1. connect to Milvus
@@ -55,10 +57,10 @@ fields = [
     FieldSchema(name="embeddings", dtype=DataType.FLOAT_VECTOR, dim=dim)
 ]
 
-schema = CollectionSchema(fields, "hello_milvus is the simplest demo to introduce the APIs")
+schema = CollectionSchema(fields, "hello_milvus is the simplest demo to introduce the APIs2")
 
 print(fmt.format("Create collection `hello_milvus`"))
-hello_milvus = Collection("hello_milvus", schema, consistency_level="Strong")
+hello_milvus = Collection("hello_milvus7", schema, consistency_level="Strong")
 
 ################################################################################
 # 3. insert data
@@ -70,14 +72,24 @@ hello_milvus = Collection("hello_milvus", schema, consistency_level="Strong")
 # - or the existing primary key field from the entities if auto_id=False in the schema.
 
 print(fmt.format("Start inserting entities"))
+# rng = np.random.default_rng(seed=19530)
+
+# print(len(entities[1]))
+# insert_result = hello_milvus.insert(entities)
+df = pd.read_excel('Book1.xlsx')
+vectorizer = CountVectorizer(min_df=0, lowercase=False)
+vectorizer.fit(df['sentence'])
+vectorizer.vocabulary_
+# num_entities = len(df['sentence'])
+# vectorizer.transform(df['sentence']).toarray()
+# insert_result = hello_milvus.insert([vectorizer.transform(df['sentence']).toarray()])
 rng = np.random.default_rng(seed=19530)
 entities = [
-    # provide the pk field because `auto_id` is set to False
+#     # provide the pk field because `auto_id` is set to False
     [str(i) for i in range(num_entities)],
     rng.random(num_entities).tolist(),  # field random, only supports list
-    rng.random((num_entities, dim)),    # field embeddings, supports numpy.ndarray and list
+    vectorizer.transform(df['sentence']).toarray(),    # field embeddings, supports numpy.ndarray and list
 ]
-
 insert_result = hello_milvus.insert(entities)
 
 hello_milvus.flush()
@@ -109,74 +121,3 @@ print(fmt.format("Start loading"))
 hello_milvus.load()
 
 # -----------------------------------------------------------------------------
-# search based on vector similarity
-print(fmt.format("Start searching based on vector similarity"))
-vectors_to_search = entities[-1][-2:]
-search_params = {
-    "metric_type": "L2",
-    "params": {"nprobe": 10},
-}
-
-start_time = time.time()
-result = hello_milvus.search(vectors_to_search, "embeddings", search_params, limit=3, output_fields=["random"])
-end_time = time.time()
-
-for hits in result:
-    for hit in hits:
-        print(f"hit: {hit}, random field: {hit.entity.get('random')}")
-print(search_latency_fmt.format(end_time - start_time))
-
-# -----------------------------------------------------------------------------
-# query based on scalar filtering(boolean, int, etc.)
-print(fmt.format("Start querying with `random > 0.5`"))
-
-start_time = time.time()
-result = hello_milvus.query(expr="random > 0.5", output_fields=["random", "embeddings"])
-end_time = time.time()
-
-print(f"query result:\n-{result[0]}")
-print(search_latency_fmt.format(end_time - start_time))
-
-# -----------------------------------------------------------------------------
-# pagination
-r1 = hello_milvus.query(expr="random > 0.5", limit=4, output_fields=["random"])
-r2 = hello_milvus.query(expr="random > 0.5", offset=1, limit=3, output_fields=["random"])
-print(f"query pagination(limit=4):\n\t{r1}")
-print(f"query pagination(offset=1, limit=3):\n\t{r2}")
-
-
-# -----------------------------------------------------------------------------
-# hybrid search
-print(fmt.format("Start hybrid searching with `random > 0.5`"))
-
-start_time = time.time()
-result = hello_milvus.search(vectors_to_search, "embeddings", search_params, limit=3, expr="random > 0.5", output_fields=["random"])
-end_time = time.time()
-
-for hits in result:
-    for hit in hits:
-        print(f"hit: {hit}, random field: {hit.entity.get('random')}")
-print(search_latency_fmt.format(end_time - start_time))
-
-###############################################################################
-# 6. delete entities by PK
-# You can delete entities by their PK values using boolean expressions.
-ids = insert_result.primary_keys
-
-expr = f'pk in ["{ids[0]}" , "{ids[1]}"]'
-print(fmt.format(f"Start deleting with expr `{expr}`"))
-
-result = hello_milvus.query(expr=expr, output_fields=["random", "embeddings"])
-print(f"query before delete by expr=`{expr}` -> result: \n-{result[0]}\n-{result[1]}\n")
-
-hello_milvus.delete(expr)
-
-result = hello_milvus.query(expr=expr, output_fields=["random", "embeddings"])
-print(f"query after delete by expr=`{expr}` -> result: {result}\n")
-
-
-###############################################################################
-# 7. drop collection
-# Finally, drop the hello_milvus collection
-print(fmt.format("Drop collection `hello_milvus`"))
-utility.drop_collection("hello_milvus")
